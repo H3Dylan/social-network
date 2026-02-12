@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
-import prisma from "@/lib/prisma"
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
 interface RouteParams {
     params: Promise<{ mediaId: string }>
@@ -10,48 +10,47 @@ interface RouteParams {
 export async function POST(req: Request, props: RouteParams) {
     const params = await props.params;
     try {
-        const session = await getServerSession(authOptions)
+        const session = await getServerSession(authOptions);
         if (!session || !session.user?.email) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const { type } = await req.json() // e.g., "LIKE"
+        const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+        if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-        const user = await prisma.user.findUnique({ where: { email: session.user.email } })
-        if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 })
+        const { mediaId } = params;
+        const { emoji } = await req.json();
 
-        const mediaId = params.mediaId
-
-        // Check if reaction exists
-        const existingReaction = await prisma.reaction.findUnique({
+        // Check if specific reaction (user + media + emoji) exists
+        const existing = await prisma.reaction.findUnique({
             where: {
-                userId_mediaId_type: {
+                userId_mediaId_emoji: {
                     userId: user.id,
-                    mediaId,
-                    type: type || 'LIKE'
+                    mediaId: mediaId,
+                    emoji: emoji
                 }
             }
-        })
+        });
 
-        if (existingReaction) {
-            // Toggle off (delete)
-            await prisma.reaction.delete({
-                where: { id: existingReaction.id }
-            })
-            return NextResponse.json({ deleted: true })
+        if (existing) {
+            // Remove if clicking same emoji (toggle off)
+            await prisma.reaction.delete({ where: { id: existing.id } });
+            return NextResponse.json({ status: 'removed' });
         } else {
-            // Create
-            const reaction = await prisma.reaction.create({
+            // Create new (allow multiple different emojis)
+            const created = await prisma.reaction.create({
                 data: {
-                    type: type || 'LIKE',
                     userId: user.id,
-                    mediaId
+                    mediaId: mediaId,
+                    type: "EMOJI",
+                    emoji: emoji
                 }
-            })
-            return NextResponse.json(reaction)
+            });
+            return NextResponse.json(created);
         }
 
     } catch (error) {
-        return NextResponse.json({ error: "Failed to react" }, { status: 500 })
+        console.error(error);
+        return NextResponse.json({ error: "Internal Error" }, { status: 500 });
     }
 }

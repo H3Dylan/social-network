@@ -1,23 +1,22 @@
 import prisma from "@/lib/prisma";
-import GroupCard from "@/components/GroupCard";
-
-export const dynamic = 'force-dynamic';
-
+import HomeClient from "@/components/HomeClient";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
-async function getGroups() {
+export const dynamic = 'force-dynamic';
+
+async function getData() {
   const session = await getServerSession(authOptions);
 
   if (!session || !session.user?.email) {
-    return [];
+    return { groups: [], feedItems: [], currentUserId: null };
   }
 
   const user = await prisma.user.findUnique({
     where: { email: session.user.email }
   });
 
-  if (!user) return [];
+  if (!user) return { groups: [], feedItems: [], currentUserId: null };
 
   const groups = await prisma.group.findMany({
     where: {
@@ -33,50 +32,55 @@ async function getGroups() {
     },
     orderBy: { createdAt: 'desc' }
   });
-  return groups;
+
+  // Fetch feed items (latest media from user's groups)
+  const groupIds = groups.map(g => g.id);
+
+  const rawFeedItems = await prisma.media.findMany({
+    where: {
+      album: {
+        groupId: { in: groupIds }
+      }
+    },
+    include: {
+      user: {
+        select: { id: true, name: true, image: true }
+      },
+      album: {
+        include: {
+          group: {
+            select: { id: true, name: true }
+          }
+        }
+      },
+      _count: {
+        select: { reactions: true, comments: true }
+      },
+      reactions: {
+        select: { userId: true, emoji: true, user: { select: { name: true } } }
+      }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 20
+  });
+
+  const feedItems = rawFeedItems.map(item => ({
+    id: item.id,
+    url: item.url,
+    type: item.type,
+    createdAt: item.createdAt,
+    user: item.user,
+    group: item.album.group,
+    album: { id: item.album.id, title: item.album.title },
+    _count: item._count,
+    reactions: item.reactions,
+  }));
+
+  return { groups, feedItems, currentUserId: user.id };
 }
 
 export default async function Home() {
-  const groups = await getGroups();
+  const { groups, feedItems, currentUserId } = await getData();
 
-  return (
-    <div className="home-page">
-      <header className="hero">
-        <div className="container">
-          <h1 className="hero-title">My Communities</h1>
-          <p className="hero-subtitle">
-            Join groups, share memories, and connect with friends through shared albums.
-          </p>
-        </div>
-      </header>
-
-      <div className="container">
-        <div className="groups-grid">
-          {groups.map((group) => (
-            <GroupCard
-              key={group.id}
-              id={group.id}
-              name={group.name}
-              description={group.description}
-              memberCount={group._count.members}
-              albumCount={group._count.albums}
-            />
-          ))}
-
-          {groups.length === 0 && (
-            <div className="empty-state">
-              <p>You haven't joined any groups yet. Create one or ask for an invite!</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Global Styles for this page can be scoped or added here if using CSS-in-JS pattern broadly, 
-          but usually Next.js prefers CSS modules or global CSS. 
-          Mixing 'style jsx' for component-level styling in this setup.
-      */}
-      {/* @ts-ignore */}
-
-    </div>
-  );
+  return <HomeClient groups={groups} feedItems={feedItems} currentUserId={currentUserId} />; // passing currentUserId to HomeClient
 }

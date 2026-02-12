@@ -113,18 +113,37 @@ model Comment {
   
   mediaId   String
   media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  
+  reactions Reaction[]
 }
 
 model Reaction {
   id        String   @id @default(cuid())
-  type      String   // e.g., "LIKE", "LOVE"
+  type      String   @default("EMOJI") // "LIKE", "EMOJI"
+  emoji     String   @default("👍")
   createdAt DateTime @default(now())
   
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   
-  mediaId   String
-  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  mediaId   String?
+  media     Media?   @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, mediaId, type])
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  // Enforce one reaction per user per entity
+  // Since we can't easily do partial indices in standard Prisma without raw SQL in some DBs, 
+  // and generic unique constraints on nullable fields behave differently per DB (SQLite allows multiple nulls usually).
+  // For SQLite: unique([userId, mediaId]) allows multiple rows if mediaId is null? Yes.
+  // So we can have multiple reactions where mediaId is null (comments).
+  // And multiple where commentId is null (media).
+  // But we want unique (userId, mediaId) where mediaId is NOT null.
+  // SQLite treats NULLs as distinct for UNIQUE constraints. 
+  // So `@@unique([userId, mediaId])` would work for media reactions.
+  // `@@unique([userId, commentId])` would work for comment reactions.
+  // ONE limitation: A single reaction row cannot point to BOTH (which is fine).
+  
+  @@unique([userId, mediaId, emoji])
+  @@unique([userId, commentId, emoji])
 }

@@ -1,9 +1,8 @@
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
-import Image from "next/image";
+import MediaViewClient from "@/components/MediaViewClient";
 import Link from "next/link";
-import CommentSection from "@/components/CommentSection";
-import ReactionButton from "@/components/ReactionButton";
+
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
@@ -20,10 +19,13 @@ async function getMedia(id: string) {
         where: { id },
         include: {
             comments: {
-                include: { user: true },
+                include: {
+                    user: true,
+                    reactions: { select: { userId: true, emoji: true } }
+                },
                 orderBy: { createdAt: 'desc' }
             },
-            reactions: true,
+            reactions: { select: { userId: true, emoji: true, user: { select: { name: true } } } },
             user: true // Uploader
         }
     });
@@ -39,18 +41,11 @@ export default async function MediaPage(props: PageProps) {
 
     const userEmail = session?.user?.email;
 
-
-    // Wait, we need to be sure we have user ID. In authOptions we added it.
-    // But for SSR, we might need to fetch user ID if session.user.id is missing or untyped.
-    // Ideally we fetch current user to check if they liked it.
-    let currentUserId = null;
+    let currentUserId: string | undefined = undefined;
     if (userEmail) {
         const u = await prisma.user.findUnique({ where: { email: userEmail } });
-        currentUserId = u?.id;
+        if (u) currentUserId = u.id;
     }
-
-    const userHasLiked = media.reactions.some(r => r.userId === currentUserId);
-    const likeCount = media.reactions.length;
 
     return (
         <div className="container" style={{ padding: '4rem 1rem' }}>
@@ -60,37 +55,10 @@ export default async function MediaPage(props: PageProps) {
                 </Link>
             </div>
 
-            <div className="media-container">
-                <div className="media-display">
-                    {media.type === 'VIDEO' ? (
-                        <video src={media.url} controls className="media-content" autoPlay />
-                    ) : (
-                        <div className="image-wrapper">
-                            <Image
-                                src={media.url}
-                                alt="Media Detail"
-                                fill
-                                style={{ objectFit: 'contain' }}
-                            />
-                        </div>
-                    )}
-                </div>
-
-                <div className="media-sidebar">
-                    <div className="sidebar-header">
-                        <span className="uploaded-by">Uploaded by {media.user.name}</span>
-                        <ReactionButton mediaId={media.id} initialCount={likeCount} initialLiked={userHasLiked} />
-                    </div>
-
-                    <CommentSection
-                        mediaId={media.id}
-                        initialComments={media.comments.map(c => ({
-                            ...c,
-                            createdAt: c.createdAt.toISOString()
-                        }))}
-                    />
-                </div>
-            </div>
+            <MediaViewClient
+                media={media}
+                currentUserId={currentUserId}
+            />
 
 
         </div>

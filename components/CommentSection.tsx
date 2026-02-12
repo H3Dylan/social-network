@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import CommentItem from './CommentItem';
 
 interface User {
+    id: string;
     name: string | null;
     image: string | null;
 }
@@ -13,9 +15,19 @@ interface Comment {
     content: string;
     createdAt: string;
     user: User;
+    reactions: Array<{
+        emoji: string;
+        userId: string;
+    }>;
 }
 
-export default function CommentSection({ mediaId, initialComments }: { mediaId: string, initialComments: Comment[] }) {
+interface CommentSectionProps {
+    mediaId: string;
+    initialComments: Comment[];
+    currentUserId?: string;
+}
+
+export default function CommentSection({ mediaId, initialComments, currentUserId }: CommentSectionProps) {
     const router = useRouter();
     const [comments, setComments] = useState<Comment[]>(initialComments);
     const [newComment, setNewComment] = useState('');
@@ -34,8 +46,25 @@ export default function CommentSection({ mediaId, initialComments }: { mediaId: 
             });
 
             if (res.ok) {
-                const comment = await res.json();
-                setComments([comment, ...comments]);
+                // The API currently returns the created comment.
+                // We might need to fetch the fresh comment with reactions (empty) to match types.
+                // Or just manually construct it.
+                const createdComment = await res.json();
+                const commentWithReactions: Comment = {
+                    ...createdComment,
+                    user: {
+                        id: currentUserId || '', // fallback
+                        name: createdComment.user?.name || 'You', // dependent on API return
+                        image: createdComment.user?.image
+                    },
+                    reactions: []
+                };
+
+                // Ideally API should return the user object properly. 
+                // Assuming existing API returns standard Prisma structure including user relation?
+                // I'll check the API later if needed, but standard create with include user works.
+
+                setComments([commentWithReactions, ...comments]);
                 setNewComment('');
                 router.refresh();
             }
@@ -66,13 +95,11 @@ export default function CommentSection({ mediaId, initialComments }: { mediaId: 
 
             <div className="comments-list">
                 {comments.map(comment => (
-                    <div key={comment.id} className="comment">
-                        <div className="comment-header">
-                            <span className="author">{comment.user.name || "Anonymous"}</span>
-                            <span className="date">{new Date(comment.createdAt).toLocaleDateString()}</span>
-                        </div>
-                        <p>{comment.content}</p>
-                    </div>
+                    <CommentItem
+                        key={comment.id}
+                        comment={comment}
+                        currentUserId={currentUserId}
+                    />
                 ))}
             </div>
 
@@ -125,6 +152,12 @@ export default function CommentSection({ mediaId, initialComments }: { mediaId: 
 
                 .date {
                     color: #94a3b8;
+                }
+                
+                .comment-actions {
+                    margin-top: 0.5rem;
+                    display: flex;
+                    justify-content: flex-end;
                 }
             `}</style>
         </div>
